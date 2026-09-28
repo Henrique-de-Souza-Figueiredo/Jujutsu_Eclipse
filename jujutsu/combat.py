@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 import math
 import random
 
-from .roster import BY_ID, DOMAIN_KINDS
+from .roster import BY_ID, DOMAIN_KINDS, PHENOMENA
 
 
 @dataclass
@@ -38,6 +38,23 @@ def segment_distance(point, start, end):
     length2 = delta.x ** 2 + delta.z ** 2
     t = max(0, min(1, ((point.x-start.x)*delta.x + (point.z-start.z)*delta.z) / max(.0001, length2)))
     return (point - (start + delta*t)).length()
+
+
+def swept_contact(start, end, radius):
+    """First normalized time a moving relative position reaches a circle."""
+    delta = end-start
+    c = start.x*start.x+start.z*start.z-radius*radius
+    if c <= 0:
+        return 0.0
+    a = delta.x*delta.x+delta.z*delta.z
+    if a < 1e-10:
+        return None
+    b = 2*(start.x*delta.x+start.z*delta.z)
+    discriminant = b*b-4*a*c
+    if discriminant < 0:
+        return None
+    contact = (-b-math.sqrt(discriminant))/(2*a)
+    return contact if 0 <= contact <= 1 else None
 
 
 @dataclass
@@ -78,9 +95,15 @@ class Fighter:
     best_combo: int = 0
     chain: int = 0
     chain_timer: float = 0
+    original_id: str = ''
+    adaptation: dict = field(default_factory=dict)
+    analysis: dict = field(default_factory=dict)
+    last_phenomenon: str = ''
+    adaptation_gate: float = 0
 
     def __post_init__(self):
         self.hp = self.spec.health
+        self.original_id = self.character_id
 
     @property
     def spec(self):
@@ -107,6 +130,9 @@ class Projectile:
     life: float = 2.5
     homing: bool = False
     piercing: bool = False
+    reflections: int = 0
+    trail: list = field(default_factory=list)
+    spatial: bool = False
 
 
 @dataclass
@@ -264,7 +290,9 @@ class Battle:
             return self.notify(fighter, 'Vigor insuficiente para esquivar.')
         fighter.stamina -= cost
         fighter.dash_dir = (direction if direction and direction.length() > .1 else fighter.pos - self.target(fighter).pos).unit()
-        fighter.dash_time, fighter.invulnerable = .22, .28
+        fighter.dash_time, fighter.invulnerable = .22, (.45 if fighter.has('sky_mantle') else .28)
+        if fighter.has('sky_mantle'):
+            fighter.statuses['sky_guard'] = .45
         self.animate(fighter, 'dodge', .28)
         self.emit('dodge', fighter)
         return True
@@ -282,9 +310,12 @@ class Battle:
         if not self.can_act(fighter):
             return False
         tech = fighter.spec.skills[slot]
-        if fighter.cooldowns[slot] > 0:
+        love_recast = fighter.character_id == 'yuta' and slot == 1 and fighter.has('rika')
+        if love_recast and fighter.has('love_cooldown'):
+            return self.notify(fighter, 'Amor Puro: aguarde a próxima emissão de Rika.')
+        if fighter.cooldowns[slot] > 0 and not love_recast:
             return self.notify(fighter, f'{tech.name}: recarga {fighter.cooldowns[slot]:.1f}s')
-        kind = tech.mechanic
+        kind = 'love_beam' if love_recast else tech.mechanic
         target = self.target(fighter)
         if tech.reach <= 5.5 and self.distance(fighter) > tech.reach:
             return self.notify(fighter, f'Aproxime-se: alcance de {tech.reach:g} m.')
@@ -298,26 +329,30 @@ class Battle:
             return self.notify(fighter, 'Comprima sangue com Q antes de usar esta técnica.')
         if kind == 'convergence' and fighter.blood >= 3:
             return self.notify(fighter, 'Convergência completa: use E ou R.')
-        if kind == 'copy' and not fighter.has('rika'):
+        if kind == 'copy' and not (fighter.has('rika') or fighter.has('mutual_love')):
             return self.notify(fighter, 'Cópia exige Rika: invoque-a com E.')
         if kind in ('heal', 'reshape') and fighter.hp >= fighter.spec.health:
             return self.notify(fighter, 'Vida já está completa.')
-        cost = tech.cost * (.85 if fighter.character_id == 'gojo' else 1)
+        cost = 30 if love_recast else tech.cost * (.85 if fighter.character_id == 'gojo' else 1)
         if fighter.resource < cost:
             return self.notify(fighter, f'Recurso insuficiente: precisa de {cost:g}. Segure G.')
         if fighter.character_id == 'maki':
             fighter.stamina -= cost
         else:
             fighter.energy -= cost
-        fighter.cooldowns[slot] = tech.cooldown
+        if love_recast:
+            fighter.statuses['love_cooldown'] = 3
+        else:
+            fighter.cooldowns[slot] = tech.cooldown
         self.animate(fighter, 'cast', .52)
-        self.emit('cast', fighter, text=tech.name, effect=kind)
+        self.emit('cast', fighter, text='Amor Puro' if love_recast else tech.name, effect=kind,
+                  end=target.pos.copy())
         if kind in ('blue', 'red', 'dismantle', 'cleave'):
             fighter.statuses[kind + '_ready'] = 8 if kind in ('blue', 'red') else 12
         if kind in ('purple', 'fuga'):
             for status in ('blue_ready', 'red_ready', 'dismantle_ready', 'cleave_ready'):
                 fighter.statuses.pop(status, None)
-        if kind in ('black_flash', 'ratio', 'purple', 'fuga'):
+        if kind in ('black_flash', 'ratio', 'purple', 'fuga', 'granite'):
             if side == 0:
                 self.qte = QTE(side, 'skill', tech.name.upper(), 'timing', payload=kind,
                                target=.7 if kind == 'ratio' else .66,
@@ -370,6 +405,8 @@ class Battle:
         else:
             if qte.kind in ('defend', 'clash'):
                 self.target(fighter).statuses['domain_guard'] = 7
+                if self.target(fighter).character_id == 'uro' and grade >= .6:
+                    self.target(fighter).statuses['sky_guard'] = 2.2
                 grade = 1 - grade * .8
             self._finisher(fighter, grade)
 
@@ -378,8 +415,13 @@ class Battle:
         if angle:
             direction = V2(direction.x*math.cos(angle) - direction.z*math.sin(angle),
                            direction.x*math.sin(angle) + direction.z*math.cos(angle))
+        if fighter.has('output'):
+            damage *= 1.4
+            radius *= 1.2
+            fighter.statuses.pop('output', None)
         self.projectiles.append(Projectile(self.uid(), fighter.side, fighter.pos + direction*.9,
-                                          direction, speed, damage, kind, radius, 3, homing, piercing))
+                                          direction, speed, damage, kind, radius, 3, homing, piercing,
+                                          spatial=kind == 'adaptive_slash' and fighter.adaptation.get('infinity', 0) >= 3))
 
     def _zone(self, fighter, kind, damage, radius, delay, duration=.1, position=None):
         self.zones.append(Zone(self.uid(), fighter.side, (position or self.target(fighter).pos).copy(),
@@ -389,18 +431,21 @@ class Battle:
         self.summons.append(Summon(self.uid(), fighter.side, fighter.pos + V2(1, .4), kind, duration))
         self.emit('summon', fighter, effect=kind)
 
-    def _melee(self, fighter, damage, reach, heavy=False, soul=False, label='', knockback=1):
+    def _melee(self, fighter, damage, reach, heavy=False, soul=False, label='', knockback=1,
+               phenomenon='physical', unblockable=False):
         target = self.target(fighter)
         if self.distance(fighter) <= reach and abs(fighter.height-target.height) < 1.6:
-            return self.damage(fighter, target, damage, heavy=heavy, soul=soul, label=label, knockback=knockback)
+            return self.damage(fighter, target, damage, heavy=heavy, soul=soul, label=label,
+                               knockback=knockback, phenomenon=phenomenon, unblockable=unblockable)
         self.emit('miss', fighter)
         return 0
 
     def _skill(self, f, kind, quality=1):
         t = self.target(f)
         factor = .65 + quality*.85
+        self.emit('technique', f, effect=kind, end=t.pos.copy(), quality=quality)
         if kind == 'blue':
-            self._zone(f, 'blue', 16, 3.2, .5)
+            self._zone(f, 'blue', 16, 3.2, .5, 1.8)
         elif kind in ('red', 'purple', 'dismantle', 'fuga'):
             damage, speed, radius = {'red': (25, 14, .6), 'purple': (46*factor, 13, 1.1),
                                       'dismantle': (21, 21, .65), 'fuga': (43*factor, 17, .8)}[kind]
@@ -449,14 +494,23 @@ class Battle:
             f.statuses['rika'] = 8
         elif kind == 'copy':
             copied = t.spec.skills[0].mechanic
-            if t.character_id == 'maki':
+            copied_name = t.spec.skills[0].name
+            if t.character_id == 'uro':
+                self._skill(f, 'sky_guard')
+                copied_name = 'Dobra do Céu'
+            elif t.character_id == 'mahoraga':
+                self._projectile(f, 'dismantle', 27, 19, .6, piercing=True)
+                copied_name = 'Desmantelar (técnica armazenada)'
+            elif t.character_id == 'maki':
                 t.stun = 1.3
-                self.damage(f, t, 13, unblockable=True, label='PARE!')
+                self.damage(f, t, 13, unblockable=True, label='PARE!', phenomenon='soul')
+                copied_name = 'Fala Amaldiçoada'
             elif copied == 'convergence':
                 self._projectile(f, 'blood', 29, 30, .35, piercing=True)
+                copied_name = 'Sangue Perfurante'
             else:
                 self._skill(f, copied, .8)
-            self.emit('notice', f, text='Cópia: ' + ('Fala Amaldiçoada' if t.character_id == 'maki' else t.spec.skills[0].name))
+            self.emit('notice', f, text='Cópia: '+copied_name)
         elif kind in ('heal', 'reshape'):
             amount = 30 if kind == 'reshape' else 36
             f.hp = min(f.spec.health, f.hp + amount)
@@ -491,7 +545,7 @@ class Battle:
         elif kind == 'reinforce':
             f.statuses['armor'] = f.statuses['empower'] = 5
         elif kind == 'cleave':
-            self._melee(f, 27 + t.guard*.06, 3.2, heavy=True, knockback=.6)
+            self._melee(f, 27 + t.guard*.06, 3.2, heavy=True, knockback=.6, phenomenon='slash')
         elif kind == 'soul_touch':
             if self._melee(f, 18, 3, soul=True):
                 t.marks['soul'] = t.marks.get('soul', 0)+1
@@ -499,7 +553,7 @@ class Battle:
                     t.marks['soul'] = 0
                     self.damage(f, t, 26, soul=True, unblockable=True, label='RUPTURA DA ALMA')
         elif kind == 'morph_blade':
-            self._melee(f, 26, 5.5, heavy=True)
+            self._melee(f, 26, 5.5, heavy=True, phenomenon='slash')
             self.emit('blade', f, end=t.pos.copy())
         elif kind == 'soul_armor':
             f.statuses['armor'] = f.statuses['empower'] = f.statuses['morph'] = 6
@@ -523,41 +577,173 @@ class Battle:
             f.blood = 0
         elif kind == 'red_scale':
             f.statuses['haste'] = f.statuses['empower'] = f.statuses['armor'] = 6
+        elif kind == 'mahoraga':
+            self.transform(f, 'mahoraga')
+        elif kind == 'extermination':
+            self._melee(f, 30, 4.5, heavy=True, phenomenon='positive', knockback=2)
+        elif kind == 'general_slam':
+            f.pos += (t.pos-f.pos).unit()*max(0, min(5, self.distance(f)-2))
+            self._zone(f, 'general_slam', 32, 3.8, .45, position=f.pos)
+            f.statuses['armor'] = 1
+        elif kind == 'adaptive_slash':
+            self._projectile(f, 'adaptive_slash', 35, 18, .9, piercing=True)
+        elif kind == 'wheel':
+            if f.last_phenomenon:
+                self._adapt(f, f.last_phenomenon, force=True)
+            f.hp = min(f.spec.health, f.hp+18)
+            self.emit('heal', f, amount=18)
+        elif kind == 'granite':
+            self._projectile(f, 'granite', 32*factor, 18, .6+.3*quality)
+        elif kind == 'granite_volley':
+            for angle in (-.24, -.12, 0, .12, .24):
+                self._projectile(f, 'granite_small', 13, 16, .32, angle=angle)
+        elif kind == 'point_blank':
+            self._melee(f, 34, 3.5, heavy=True, knockback=3.5, phenomenon='beam')
+        elif kind == 'output':
+            f.statuses['output'] = 6
+        elif kind == 'thin_ice':
+            self._melee(f, 29, 4.5, knockback=3, phenomenon='space', unblockable=True)
+        elif kind == 'sky_guard':
+            f.statuses['sky_guard'] = 2.2
+        elif kind == 'sky_flight':
+            f.pos = t.pos+(t.pos-f.pos).unit()*2.8
+            f.invulnerable = .5
+            f.statuses['flight'] = 1.5
+        elif kind == 'sky_mantle':
+            f.statuses['sky_mantle'] = 6
+            f.stamina = min(100, f.stamina+22)
+        elif kind == 'love_beam':
+            self._projectile(f, 'love_beam', 38, 15, .85)
+        elif kind == 'cursed_speech':
+            self.damage(f, t, 12, unblockable=True, phenomenon='soul', label='NÃO SE MOVA!')
+            t.stun = 1.3
+
+    def transform(self, fighter, character_id):
+        ratio = fighter.hp/fighter.spec.health
+        fighter.character_id = character_id
+        fighter.hp = fighter.spec.health*ratio
+        fighter.cooldowns = [0.] * 4
+        fighter.statuses.clear()
+        fighter.stun = 0
+        fighter.lock = .5
+        fighter.invulnerable = .65
+        fighter.blocking = fighter.charging = False
+        fighter.action, fighter.action_time = 'ultimate', 0
+        fighter.serial += 1
+        self.summons = [s for s in self.summons if s.owner != fighter.side]
+        self.pending = [p for p in self.pending if p[1] != fighter.side]
+        self.emit('transform', fighter, text='VOCÊ CONTROLA MAHORAGA' if fighter.side == 0 else 'MAHORAGA INVOCADO')
+
+    def _adapt(self, fighter, phenomenon, force=False):
+        if fighter.character_id != 'mahoraga':
+            return
+        fighter.last_phenomenon = phenomenon
+        if fighter.adaptation.get(phenomenon, 0) >= 3 or (fighter.adaptation_gate > 0 and not force):
+            return
+        fighter.adaptation[phenomenon] = min(3, fighter.adaptation.get(phenomenon, 0)+1)
+        fighter.analysis[phenomenon] = 4.0
+        fighter.adaptation_gate = .55
+        complete = fighter.adaptation[phenomenon] >= 3
+        if complete:
+            fighter.hp = min(fighter.spec.health, fighter.hp+12)
+        self.emit('adapt', fighter, effect=phenomenon, complete=complete,
+                  text=f'{"ADAPTADO" if complete else "ANALISANDO"}: {PHENOMENA.get(phenomenon, phenomenon).upper()} {fighter.adaptation[phenomenon]}/3')
+
+    def domain_blade(self, side):
+        fighter = self.fighters[side]
+        if not self.can_act(fighter):
+            return False
+        if not self.domain or self.domain['owner'] != side or self.domain['kind'] != 'mutual_love':
+            return self.notify(fighter, 'B: katanas disponíveis dentro do domínio de Yuta.')
+        available = [s for s in self.domain['swords'] if s['respawn'] <= 0 and (s['pos']-fighter.pos).length() < 2.6]
+        if not available:
+            return self.notify(fighter, 'Aproxime-se de uma katana cravada no chão e aperte B.')
+        blade = min(available, key=lambda s: (s['pos']-fighter.pos).length())
+        blade['respawn'] = 2.5
+        self.animate(fighter, 'heavy', .45)
+        # These swords carry self-contained copied techniques; no extra resource prerequisite.
+        if blade['technique'] == 'piercing':
+            fighter.blood = max(1, fighter.blood)
+        self._skill(fighter, blade['technique'])
+        self.emit('blade_pickup', fighter, text='KATANA / '+blade['label'], effect=blade['technique'])
+        return True
 
     def _finisher(self, fighter, quality):
         kind = fighter.spec.ultimate_kind
         target = self.target(fighter)
         factor = .4 + quality*.6
-        fighter.lock = .65
+        fighter.lock = 1.2
         if kind in DOMAIN_KINDS:
             # A new domain replaces the old field, including its damage zones.
+            if self.domain:
+                old_owner = self.fighters[self.domain['owner']]
+                old_owner.statuses.pop(self.domain['kind'], None)
             self.zones = [z for z in self.zones if z.kind not in DOMAIN_KINDS]
-            self.domain = dict(owner=fighter.side, kind=kind, remaining=6, quality=quality)
-            fighter.statuses[kind] = 6
-            self._zone(fighter, kind, 10*factor, 10, .35, 5.6, position=fighter.pos)
+            duration = 9 if kind == 'mutual_love' else 6
+            self.domain = dict(owner=fighter.side, kind=kind, remaining=duration, quality=quality, center=fighter.pos.copy())
+            fighter.statuses[kind] = duration
+            self._zone(fighter, kind, 10*factor, 10, .35, duration-.4, position=fighter.pos)
             if kind == 'void':
                 target.stun = .8 + 1.8*quality
             if kind == 'shadow_domain':
                 self._summon(fighter, 'dog', 8.75)
                 self._summon(fighter, 'dog', 8.75)
+            if kind == 'mutual_love':
+                fighter.statuses['rika'] = duration
+                if not any(s.owner == fighter.side and s.kind == 'rika' for s in self.summons):
+                    self._summon(fighter, 'rika', duration)
+                copies = [('thin_ice', 'QUEBRA-GELO FINO'), ('sky_guard', 'DOBRA DO CÉU'),
+                          ('cleave', 'CLIVAR'), ('cursed_speech', 'FALA AMALDIÇOADA')]
+                self.domain['swords'] = []
+                for i in range(10):
+                    angle = i*math.tau/10
+                    position = fighter.pos+V2(math.cos(angle), math.sin(angle))*(1.6 if i == 0 else (3.5 if i % 2 else 5.5))
+                    if position.length() > 11:
+                        position = position.unit()*11
+                    technique, label = self.rng.choice(copies)
+                    self.domain['swords'].append(dict(uid=self.uid(), pos=position, technique=technique, label=label, respawn=0.0))
             self.emit('domain', fighter, text=fighter.spec.ultimate, effect=kind)
+        elif kind == 'granite_final':
+            self._projectile(fighter, 'granite_max', 91*factor, 14, 1.45)
+            self.emit('finisher', fighter, end=target.pos.copy(), effect=kind)
+        elif kind == 'sky_final':
+            self._zone(fighter, 'sky_final', 77*factor, 5.5, .42)
+            self.emit('finisher', fighter, end=target.pos.copy(), effect=kind)
+        elif kind == 'blood_final':
+            for angle in (-.22, -.15, -.08, 0, .08, .15, .22):
+                self._projectile(fighter, 'blood', 12*factor, 19, .24, homing=True, angle=angle, piercing=True)
+            self.emit('finisher', fighter, end=target.pos.copy(), effect=kind)
         else:
             fighter.pos = target.pos + (fighter.pos-target.pos).unit()*2.3
-            self.damage(fighter, target, (77 if kind == 'love_beam' else 68)*factor,
-                        soul=kind in ('black_rush', 'resonance_final'), unblockable=True,
-                        domain=True, label=fighter.spec.ultimate, knockback=3)
+            target.stun = max(target.stun, 1.15)
+            for i in range(4):
+                self.schedule(fighter, .08+i*.27, 'finisher_strike',
+                              dict(amount=(12 if i < 3 else 32)*factor, effect=kind, final=i == 3), interruptible=False)
             self.emit('finisher', fighter, end=target.pos.copy(), effect=kind)
             if kind == 'boogie_rush':
                 self._summon(fighter, 'brother', 3)
         self.emit('shake', fighter, strength=.25)
 
     def damage(self, source, target, amount, heavy=False, soul=False, unblockable=False,
-               label='', knockback=1, domain=False, dot=False):
+               label='', knockback=1, domain=False, dot=False, phenomenon='physical', spatial=False):
         if self.finished or target.hp <= 0 or (target.invulnerable > 0 and not domain):
             return 0
-        if target.has('infinity') and not soul and not domain:
-            self.emit('barrier', target, text='INFINITO')
-            return 0
+        if target.has('infinity') and not soul and not domain and not spatial:
+            if source.character_id == 'mahoraga':
+                self._adapt(source, 'infinity')
+            if source.adaptation.get('infinity', 0) < 3:
+                self.emit('barrier', target, text='INFINITO')
+                return 0
+        if soul:
+            phenomenon = 'soul'
+        elif domain and phenomenon == 'physical':
+            phenomenon = 'domain'
+        if target.adaptation.get(phenomenon, 0) >= 3:
+            amount *= .35
+        if phenomenon == 'positive' and target.character_id in ('mahito', 'jogo'):
+            amount *= 1.5
+        if target.has('sky_guard') and phenomenon in ('physical', 'slash') and not domain and not spatial:
+            amount *= .45
         if target.has('counter') and not domain and not dot and not unblockable:
             target.statuses.pop('counter')
             source.stun = .7
@@ -609,6 +795,8 @@ class Battle:
             target.pos += (target.pos-source.pos).unit()*knockback
         amount = min(target.hp, amount)
         target.hp = max(0, target.hp-amount)
+        if amount > 0 and not dot and target.hp > 0:
+            self._adapt(target, phenomenon)
         source.damage_dealt += amount
         source.ultimate = min(100, source.ultimate+amount*.5)
         target.ultimate = min(100, target.ultimate+amount*.32)
@@ -619,7 +807,7 @@ class Battle:
             source.best_combo = max(source.best_combo, source.chain)
             source.energy = min(100, source.energy+2)
             self.emit('hit', source, pos=target.pos.copy(), target=target.side, amount=round(amount),
-                      text=label, blocked=blocked, soul=soul, heavy=heavy)
+                      text=label, blocked=blocked, soul=soul, heavy=heavy, effect=phenomenon)
         if target.hp == 0:
             if self.training:
                 target.hp = target.spec.health
@@ -647,6 +835,9 @@ class Battle:
         if not self.training:
             return
         for f in self.fighters:
+            if f.character_id != f.original_id:
+                f.character_id = f.original_id
+                self.emit('transform', f, text='TREINO / FORMA ORIGINAL')
             f.hp, f.energy, f.stamina, f.guard, f.ultimate = f.spec.health, 100, 100, 100, 100
             f.cooldowns = [0.] * 4
             f.statuses.clear()
@@ -660,6 +851,10 @@ class Battle:
             f.action_time = 0
             f.move = V2()
             f.serial += 1
+            f.adaptation.clear()
+            f.analysis.clear()
+            f.last_phenomenon = ''
+            f.adaptation_gate = 0
             f.blocking = f.charging = False
         self.pending.clear()
         self.projectiles.clear()
@@ -709,6 +904,17 @@ class Battle:
                 self.damage(f, self.target(f), data, soul=True, label='IMPACTO DIVERGENTE')
             elif kind == 'skill':
                 self._skill(f, *data)
+            elif kind == 'finisher_strike':
+                target = self.target(f)
+                effect = data['effect']
+                if effect == 'boogie_rush':
+                    f.pos, target.pos = target.pos.copy(), f.pos.copy()
+                    self.emit('swap', f, end=target.pos.copy())
+                self.damage(f, target, data['amount'], soul=effect in ('black_rush', 'resonance_final'),
+                            domain=True, unblockable=True, heavy=data['final'],
+                            phenomenon='positive' if effect == 'general_final' else ('slash' if effect == 'weapon_rush' else 'physical'),
+                            label=f.spec.ultimate if data['final'] else '', knockback=3 if data['final'] else .08)
+                self.emit('finisher_hit', f, effect=effect, end=target.pos.copy(), final=data['final'])
         if self.finished:
             return
         self._tick_projectiles(dt)
@@ -716,7 +922,10 @@ class Battle:
         self._tick_summons(dt)
         if self.domain:
             self.domain['remaining'] -= dt
+            for blade in self.domain.get('swords', []):
+                blade['respawn'] = max(0, blade['respawn']-dt)
             if self.domain['remaining'] <= 0:
+                self.fighters[self.domain['owner']].statuses.pop(self.domain['kind'], None)
                 self.domain = None
         # Bounds and separation are applied after every kind of displacement.
         for f in self.fighters:
@@ -731,10 +940,16 @@ class Battle:
             b.pos += correction
 
     def _tick_fighter(self, f, dt):
-        for attr in ('stun', 'lock', 'invulnerable', 'parry', 'combo_window', 'chain_timer'):
+        for attr in ('stun', 'lock', 'invulnerable', 'parry', 'combo_window', 'chain_timer', 'adaptation_gate'):
             setattr(f, attr, max(0, getattr(f, attr)-dt))
         f.cooldowns = [max(0, cd-dt) for cd in f.cooldowns]
         f.statuses = {key: value-dt for key, value in f.statuses.items() if value > dt}
+        for phenomenon in list(f.analysis):
+            f.analysis[phenomenon] -= dt
+            if f.analysis[phenomenon] <= 0:
+                self._adapt(f, phenomenon, force=True)
+                if f.adaptation.get(phenomenon, 0) >= 3:
+                    f.analysis.pop(phenomenon, None)
         f.action_time += dt
         if f.lock <= 0 and f.stun <= 0:
             f.action = 'guard' if f.blocking else ('charge' if f.charging else ('run' if f.move.length() > .1 else 'idle'))
@@ -747,10 +962,13 @@ class Battle:
             if f.character_id == 'maki':
                 f.stamina = min(100, f.stamina+dt*25)
         if f.has('burn'):
-            self.damage(self.target(f), f, dt*3, dot=True, knockback=0)
+            self.damage(self.target(f), f, dt*3, dot=True, knockback=0, phenomenon='fire')
         if self.training and f.side == 0:
             f.ultimate = min(100, f.ultimate+dt*12)
-        if f.height > 0 or f.vertical_speed > 0:
+        if f.has('flight'):
+            f.height = .9
+            f.vertical_speed = 0
+        elif f.height > 0 or f.vertical_speed > 0:
             f.vertical_speed -= dt*19
             f.height = max(0, f.height + f.vertical_speed*dt)
             if f.height == 0:
@@ -763,20 +981,93 @@ class Battle:
             f.pos += f.move.unit()*dt*speed if f.move.length() > .01 else V2()
 
     def _tick_projectiles(self, dt):
-        for p in self.projectiles[:]:
-            if self.finished:
-                return
-            f = self.fighters[p.owner]
-            t = self.target(f)
-            start = p.pos.copy()
+        starts = {}
+        active = list(self.projectiles)
+        for p in active:
+            starts[p.uid] = p.pos.copy()
+            p.trail.append(p.pos.copy())
+            p.trail = p.trail[-9:]
+            target = self.fighters[1-p.owner]
             if p.homing:
-                desired = (t.pos-p.pos).unit()
+                desired = (target.pos-p.pos).unit()
                 p.direction = (p.direction*(1-dt*3)+desired*dt*3).unit()
+            for zone in self.zones:
+                if zone.kind == 'blue' and zone.activated and (zone.pos-p.pos).length() < 5:
+                    pull = (zone.pos-p.pos).unit()
+                    p.direction = (p.direction*(1-dt*5)+pull*dt*5).unit()
             p.pos += p.direction*dt*p.speed
             p.life -= dt
-            if segment_distance(t.pos, start, p.pos) < .65+p.radius and t.height < 1.4:
-                hit = self.damage(f, t, p.damage, heavy=p.kind in ('red', 'purple'),
-                                  unblockable=p.piercing, knockback=3 if p.kind == 'red' else .5)
+
+        # Resolve contacts in travel order: a collision behind a fighter cannot save them.
+        contacts = []
+        reflections = {}
+        for i, a in enumerate(active):
+            if a.life <= 0:
+                continue
+            for b in active[i+1:]:
+                if b.life <= 0 or a.owner == b.owner:
+                    continue
+                contact = swept_contact(starts[a.uid]-starts[b.uid], a.pos-b.pos, a.radius+b.radius)
+                if contact is not None:
+                    contacts.append((contact, 0, a, b))
+            target = self.fighters[1-a.owner]
+            reflective = (target.has('sky_guard') or
+                          (target.character_id == 'uro' and target.blocking and target.parry > 0))
+            reflections[a.uid] = reflective and not a.spatial and a.reflections < 2 and target.energy >= 3
+            radius = (1.6 if reflections[a.uid] else (.95 if target.character_id == 'mahoraga' else .65))+a.radius
+            if target.height < 1.4 or reflections[a.uid]:
+                contact = swept_contact(starts[a.uid]-target.pos, a.pos-target.pos, radius)
+                if contact is not None:
+                    contacts.append((contact, 1, a, None))
+
+        phenomena = {'red': 'space', 'purple': 'space', 'dismantle': 'slash',
+                     'adaptive_slash': 'slash', 'blood': 'blood', 'fire': 'fire',
+                     'ember': 'fire', 'fuga': 'fire', 'granite': 'beam',
+                     'granite_small': 'beam', 'granite_max': 'beam', 'love_beam': 'beam'}
+        redirected = set()
+        for contact, category, p, other in sorted(contacts, key=lambda row: (row[0], row[1])):
+            if self.finished:
+                return
+            if p.life <= 0 or p.uid in redirected:
+                continue
+            impact = starts[p.uid]+(p.pos-starts[p.uid])*contact
+            if category == 0:
+                a, b = p, other
+                if b.life <= 0 or b.uid in redirected or a.owner == b.owner:
+                    continue
+                sa = a.damage*(1.12 if self.fighters[a.owner].character_id == 'ryu' else 1)
+                sb = b.damage*(1.12 if self.fighters[b.owner].character_id == 'ryu' else 1)
+                self.emit('beam_clash', self.fighters[a.owner], pos=impact, effect=a.kind)
+                if abs(sa-sb) < max(6, max(sa, sb)*.12):
+                    a.life = b.life = 0
+                elif sa > sb:
+                    a.damage = max(1, a.damage-b.damage*.65)
+                    b.life = 0
+                else:
+                    b.damage = max(1, b.damage-a.damage*.65)
+                    a.life = 0
+                continue
+            f, t = self.fighters[p.owner], self.fighters[1-p.owner]
+            if reflections.get(p.uid) and t.energy >= 3:
+                old_owner = p.owner
+                p.owner = t.side
+                p.direction = (f.pos-t.pos).unit()
+                p.pos = t.pos+p.direction*min(1.65+p.radius, (f.pos-t.pos).length()*.45)
+                p.reflections += 1
+                p.homing = False
+                p.life = max(p.life, 1.7)
+                p.speed *= 1.05
+                t.energy -= 3
+                t.parry = 0
+                p.trail.clear()
+                redirected.add(p.uid)
+                self.emit('reflect', t, end=f.pos.copy(), effect=p.kind, previous_owner=old_owner,
+                          text='PROJÉTIL REDIRECIONADO')
+                continue
+            if t.height < 1.4:
+                hit = self.damage(f, t, p.damage, heavy=p.kind in ('red', 'purple', 'granite_max'),
+                                  unblockable=p.piercing, knockback=3 if p.kind in ('red', 'granite_max') else .5,
+                                  phenomenon=phenomena.get(p.kind, 'physical'), spatial=p.spatial)
                 if hit:
                     if p.kind == 'nail':
                         t.marks['nails'] = min(6, t.marks.get('nails', 0)+1)
@@ -784,10 +1075,9 @@ class Battle:
                         t.statuses['root'] = 1.7
                     elif p.kind in ('fire', 'ember', 'fuga'):
                         t.statuses['burn'] = 3
+                self.emit('projectile_impact', f, pos=impact, effect=p.kind)
                 p.life = 0
-            if p.life <= 0 or p.pos.length() > 22:
-                if p in self.projectiles:
-                    self.projectiles.remove(p)
+        self.projectiles = [p for p in self.projectiles if p.life > 0 and p.pos.length() < 22]
 
     def _tick_zones(self, dt):
         for z in self.zones[:]:
@@ -805,11 +1095,19 @@ class Battle:
             t = self.target(f)
             is_domain = z.kind in DOMAIN_KINDS
             if z.tick <= 0:
-                z.tick = .75
+                z.tick = 10 if z.kind == 'blue' else .75
                 if (t.pos-z.pos).length() <= z.radius and (t.height < .8 or is_domain or z.kind in ('nue', 'meteor')):
-                    hit = self.damage(f, t, z.damage, heavy=z.kind in ('meteor', 'collapse'),
+                    if z.kind == 'mutual_love':
+                        for buff in ('infinity', 'sky_guard', 'armor'):
+                            t.statuses.pop(buff, None)
+                        self.emit('jacob', f, pos=t.pos.copy())
+                    phenomenon = {'blue': 'space', 'nue': 'electric', 'volcano': 'fire', 'meteor': 'fire',
+                                  'volcano_domain': 'fire', 'supernova': 'blood', 'shrine': 'slash',
+                                  'mutual_love': 'positive', 'sky_final': 'space'}.get(z.kind, 'physical')
+                    hit = self.damage(f, t, z.damage, heavy=z.kind in ('meteor', 'collapse', 'general_slam'),
                                       soul=z.kind == 'soul_domain', domain=is_domain,
-                                      unblockable=is_domain, knockback=0 if is_domain else .5)
+                                      unblockable=is_domain or z.kind == 'sky_final', knockback=0 if is_domain else .5,
+                                      phenomenon=phenomenon)
                     if hit:
                         if z.kind == 'blue':
                             t.pos = f.pos + (t.pos-f.pos).unit()*2.4
@@ -848,7 +1146,7 @@ class Battle:
         f.ai_guard = max(0, f.ai_guard-dt)
         self.set_guard(f.side, f.ai_guard > 0)
         direction = (t.pos-f.pos).unit()
-        ranged = f.character_id in ('gojo', 'nobara', 'megumi', 'choso', 'jogo')
+        ranged = f.character_id in ('gojo', 'nobara', 'megumi', 'choso', 'jogo', 'ryu')
         desired = 5.5 if ranged and f.energy > 25 else 2.1
         if distance > desired+.6:
             f.move = direction
@@ -865,6 +1163,11 @@ class Battle:
         if f.ai_timer > 0 or not self.can_act(f):
             return
         f.ai_timer = self.rng.uniform(.4, .8) * {'Fácil': 1.5, 'Normal': 1, 'Difícil': .65}[self.difficulty]
+        if f.character_id == 'uro' and any(p.owner != f.side and (p.pos-f.pos).length() < 7 for p in self.projectiles):
+            if self.cast(f.side, 1):
+                return
+        if f.has('mutual_love') and self.domain_blade(f.side):
+            return
         if f.ultimate >= 100 and distance < 10:
             self.ultimate(f.side)
             return
@@ -877,6 +1180,7 @@ class Battle:
             'nobara': [2, 1, 0, 3], 'yuta': [1, 2, 0, 3], 'maki': [1, 0, 2, 3],
             'nanami': [0, 2, 1, 3], 'todo': [0, 2, 1, 3], 'sukuna': [2, 1, 0, 3],
             'mahito': [0, 1, 2, 3], 'jogo': [1, 0, 2, 3], 'choso': [1, 2, 0, 3],
+            'ryu': [3, 0, 1, 2], 'uro': [0, 2, 1, 3], 'mahoraga': [0, 2, 1, 3],
         }[f.character_id]
         if self.rng.random() < .72:
             for slot in priorities:

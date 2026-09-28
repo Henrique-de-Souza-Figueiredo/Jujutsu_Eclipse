@@ -138,12 +138,15 @@ class CharacterModel(Entity):
         self.last_weapon = -1
         self.base_scale = 1
         cid, spec = character_id, self.spec
-        broad = 1.22 if cid == 'todo' else (1.1 if cid in ('nanami', 'sukuna') else .95)
+        broad = 1.4 if cid == 'mahoraga' else (1.22 if cid in ('todo', 'ryu') else (1.1 if cid in ('nanami', 'sukuna') else .95))
         skin = '#e6baa2' if cid not in ('jogo', 'mahito') else ('#cab999' if cid == 'jogo' else '#d4d0cb')
+        if cid == 'mahoraga':
+            skin = '#e5e5d7'
+        bare = cid in ('todo', 'mahoraga', 'uro')
         clothes = spec.outfit
         self.body = Entity(parent=self, y=1.55)
         part(self.body, loft(((0, .30, .21), (.20, .34, .23), (.78, .46, .24), (1.03, .35, .21))),
-             scale=(broad, 1, 1), tone=skin if cid == 'todo' else clothes)
+             scale=(broad, 1, 1), tone=skin if cid in ('todo', 'mahoraga') else clothes)
         part(self.body, pos=(0, .02, 0), scale=(.65*broad, .33, .46), tone=clothes)
         part(self.body, 'cube', (0, .14, 0), (.66*broad, .09, .45), '#141c2b')
         part(self.body, 'cube', (.04, .14, .235), (.12, .08, .02), '#cbb47c')
@@ -160,12 +163,12 @@ class CharacterModel(Entity):
         self.arms, self.forearms, self.hands = [], [], []
         for side in (-1, 1):
             shoulder = Entity(parent=self.body, position=(side*.46*broad, .86, 0), rotation_z=side*9)
-            part(shoulder, pos=(0, -.08, 0), scale=(.35, .34, .34), tone=skin if cid == 'todo' else clothes)
+            part(shoulder, pos=(0, -.08, 0), scale=(.35, .34, .34), tone=skin if bare else clothes)
             part(shoulder, loft(((-.56, .12, .12), (-.3, .145, .145), (0, .17, .17))),
-                 tone=skin if cid == 'todo' else clothes)
+                 tone=skin if bare else clothes)
             elbow = Entity(parent=shoulder, y=-.56)
             part(elbow, loft(((-.49, .09, .10), (-.18, .12, .13), (0, .125, .13))),
-                 tone=skin if cid in ('todo', 'sukuna') else clothes)
+                 tone=skin if bare or cid == 'sukuna' else clothes)
             part(elbow, 'cube', (0, -.44, 0), (.205, .085, .22), '#b12743' if cid == 'yuji' else '#1b2333')
             hand = Entity(parent=elbow, y=-.57)
             part(hand, pos=(0, 0, .02), scale=(.19, .24, .21), tone=skin)
@@ -175,7 +178,7 @@ class CharacterModel(Entity):
             self.hands.append(hand)
 
         self.legs, self.knees = [], []
-        pants = '#202538' if cid not in ('nanami', 'sukuna', 'todo', 'choso') else clothes
+        pants = '#202538' if cid not in ('nanami', 'sukuna', 'todo', 'choso', 'mahoraga', 'uro') else clothes
         for side in (-1, 1):
             hip = Entity(parent=self, position=(side*.20*broad, 1.55, 0))
             part(hip, loft(((-.72, .13, .14), (-.2, .17, .18), (.08, .18, .20))), tone=pants)
@@ -197,9 +200,25 @@ class CharacterModel(Entity):
             self.scale = .88
         elif cid == 'todo':
             self.scale = 1.09
+        elif cid == 'mahoraga':
+            self.scale = 1.43
+        elif cid == 'ryu':
+            self.scale = 1.08
         self.base_scale = self.scale_x
 
     def _face(self, cid, skin):
+        if cid == 'mahoraga':
+            part(self.head, pos=(0, -.12, .19), scale=(.44, .29, .21), tone='#eeeedd')
+            part(self.head, 'cube', (0, -.16, .301), (.30, .06, .025), '#4f514a')
+            for i in range(7):
+                part(self.head, 'cube', ((i-3)*.04, -.147, .32), (.023, .05, .02), '#ffffff')
+            for side in (-1, 1):
+                for row in range(2):
+                    wing = Entity(parent=self.head, position=(side*.23, .04+row*.17, .02), rotation_z=side*(18+row*16))
+                    for j in range(4):
+                        part(wing, Cone(5), (side*(.13+j*.075), .025*j, -.02*j),
+                             (.10, .38-j*.04, .07), skin, rotation=(0, 0, -side*67))
+            return
         if cid == 'jogo':
             part(self.head, pos=(0, .015, .253), scale=(.30, .19, .08), tone='#f8efc7')
             part(self.head, pos=(0, .015, .300), scale=(.085, .13, .03), tone='#262227')
@@ -242,6 +261,18 @@ class CharacterModel(Entity):
 
     def _hair(self, cid):
         hair = self.spec.hair
+        if cid == 'mahoraga':
+            part(self.head, loft(((.14, .27, .23), (.34, .20, .17), (.47, .07, .09))), tone=hair)
+            for side in (-1, 1):
+                part(self.head, Cone(6), (side*.2, .3, -.16), (.19, .64, .16), hair,
+                     rotation=(-65, 0, side*24))
+            return
+        if cid == 'ryu':
+            part(self.head, pos=(0, .29, -.02), scale=(.60, .29, .55), tone=hair)
+            part(self.head, pos=(0, .44, .20), scale=(.49, .37, .78), tone=hair, rotation=(-17, 0, 0))
+            for i in range(6):
+                stroke(self.head, ((i-2.5)*.07, .44, .56), ((i-2.5)*.07, .59, .09), .018, '#654e77')
+            return
         part(self.head, pos=(0, .23, -.025), scale=(.59, .31, .55), tone=hair)
         if cid in ('gojo', 'yuji', 'megumi', 'sukuna'):
             rng = random.Random(13)
@@ -262,12 +293,16 @@ class CharacterModel(Entity):
                 x = (i-4)*.062
                 part(self.head, pos=(x, .2+(i%3)*.016, .178), scale=(.12, .33, .17), tone=hair,
                      rotation=(12, 0, 20 if cid == 'nanami' else -10))
-            if cid in ('nobara', 'mahito'):
+            if cid in ('nobara', 'mahito', 'uro'):
                 for side in (-1, 1):
                     part(self.head, pos=(side*.25, -.08, -.075), scale=(.20, .66 if cid == 'nobara' else .94, .39), tone=hair)
                 if cid == 'mahito':
                     for i in range(5):
                         part(self.head, pos=((i-2)*.10, -.32, -.2), scale=(.12, .88, .15), tone=hair, rotation=(16, 0, (i-2)*7))
+                if cid == 'uro':
+                    for side in (-1, 1):
+                        part(self.head, pos=(side*.32, -.22, -.12), scale=(.18, 1.10, .23), tone=hair, rotation=(10, 0, side*14))
+                        part(self.head, ring_mesh(24, .20), (side*.31, -.10, .12), .10, '#e9d486', rotation=(90, 0, 0))
             if cid == 'maki':
                 part(self.head, pos=(0, .32, -.34), scale=(.33, .35, .36), tone=hair)
                 part(self.head, pos=(0, -.05, -.46), scale=(.27, .71, .28), tone=hair, rotation=(-20, 0, 0))
@@ -279,6 +314,47 @@ class CharacterModel(Entity):
                     part(self.head, pos=(side*.32, .32, -.11), scale=(.27, .31, .31), tone=hair)
 
     def _costume(self, cid, clothes, skin):
+        self.wheel = self.sky_veil = None
+        if cid == 'mahoraga':
+            for side in (-1, 1):
+                part(self.body, pos=(side*.29, .72, .16), scale=(.57, .39, .28), tone=skin)
+                for i in range(3):
+                    part(self.body, pos=(side*.15, .27+i*.14, .23), scale=(.28, .18, .12), tone=skin)
+                part(self.arms[(side+1)//2], pos=(0, -.26, 0), scale=(.40, .50, .40), tone=skin)
+            part(self.body, loft(((-.64, .62, .35), (-.16, .48, .28), (.18, .41, .26))), tone='#ded9c0')
+            for i in range(9):
+                x = (i-4)*.11
+                stroke(self.body, (x*.7, .04, .275), (x, -.60, .30), .018, '#a19f89')
+            part(self.body, 'cube', (0, .17, 0), (.95, .18, .57), '#484b43')
+            self.wheel = Entity(parent=self, y=3.94)
+            part(self.wheel, ring_mesh(64, .09), scale=.68, tone='#d8b967', rotation=(90, 0, 0), lit=False, double_sided=True)
+            part(self.wheel, pos=(0, 0, 0), scale=.20, tone='#fff2b1', lit=False)
+            for i in range(8):
+                a = i*math.tau/8
+                end = (math.cos(a)*.82, math.sin(a)*.82, 0)
+                stroke(self.wheel, (0, 0, 0), end, .055, '#bfa25f')
+                part(self.wheel, pos=end, scale=.18, tone='#fff1b7', lit=False)
+            # The tail curls behind the torso, leaving the face and sword readable.
+            for i in range(9):
+                part(self.body, pos=(math.sin(i*.48)*.22, .15+i*.09, -.30-i*.065),
+                     scale=(.16-i*.009, .18, .22), tone=skin)
+        if cid == 'ryu':
+            part(self.body, 'cube', (0, .64, .247), (.50, .72, .04), skin)
+            for side in (-1, 1):
+                for i in range(7):
+                    part(self.body, pos=(side*(.22+i*.025), .95-i*.11, .29), scale=(.20, .20, .16), tone='#b9a2bc')
+                part(self.body, 'cube', (side*.28, .37, .26), (.19, .69, .06), clothes, rotation=(0, 0, side*-12))
+            stroke(self.body, (-.14, .84, .29), (0, .58, .31), .025, '#dbc47d')
+            stroke(self.body, (.14, .84, .29), (0, .58, .31), .025, '#dbc47d')
+        if cid == 'uro':
+            self.sky_veil = Entity(parent=self.body)
+            part(self.body, loft(((-.42, .47, .28), (.25, .31, .23))), tone=clothes)
+            for i in range(4):
+                veil = part(self.sky_veil, ring_mesh(48, .40), (0, .18+i*.22, 0),
+                            (.60+i*.04, .6, .39), '#aedff2', rotation=(12+i*8, i*55, 14),
+                            lit=False, double_sided=True)
+                veil.alpha = .36
+            stroke(self.body, (-.33, .90, .23), (.25, .21, .25), .07, '#d4f5fc')
         if cid in ('gojo', 'megumi', 'yuji', 'maki'):
             collar = '#ba3f52' if cid == 'yuji' else clothes
             part(self.body, loft(((.90, .26, .245), (1.20, .245, .22))), tone=collar)
@@ -335,6 +411,11 @@ class CharacterModel(Entity):
     def _weapon(self, cid):
         self.sword = self.spear = None
         root = self.weapon_root
+        if cid == 'mahoraga':
+            self.sword = Entity(parent=self.forearms[1], position=(.14, -.25, .16), rotation_x=175)
+            part(self.sword, loft(((0, .13, .045), (1.12, .11, .035), (1.68, .005, .005)), 4), tone='#f0f1d7')
+            part(self.sword, 'cube', (0, .65, .045), (.035, 1.32, .015), '#ffffdd', lit=False)
+            part(self.sword, 'cube', (0, .06, 0), (.36, .13, .18), '#ada17a')
         if cid in ('yuta', 'maki', 'nanami', 'nobara'):
             part(root, 'cube', (0, -.12, .02), (.085, .43, .085), '#4b3440')
         if cid in ('yuta', 'maki'):
@@ -425,6 +506,18 @@ class CharacterModel(Entity):
             self.spear.enabled = not state.weapon
         if state and self.character_id == 'mahito':
             self.body.scale = (1.2, 1.07, 1.1) if state.has('morph') else (1, 1, 1)
+        if self.wheel:
+            turns = sum(getattr(state, 'adaptation', {}).values()) if state else 0
+            self.wheel.rotation_z = lerp(self.wheel.rotation_z, turns*45 + math.sin(phase)*2, min(1, dt*5))
+            self.wheel.y = 3.94+math.sin(phase*2)*.025
+        if self.sky_veil:
+            self.sky_veil.rotation_y = phase*15
+            self.sky_veil.scale = 1.35 if state and state.has('sky_guard') else 1
+        if state and state.has('flight'):
+            self.legs[0].rotation_x = -24
+            self.knees[0].rotation_x = 55
+            self.arms[0].rotation_z = -48
+            self.arms[1].rotation_z = 48
         if state and state.hp <= 0:
             self.body.rotation_z = lerp(self.body.rotation_z, 75, min(1, dt*5))
             self.body.y = .4

@@ -6,7 +6,7 @@ from ursina import Entity, Vec3, camera, window, application, held_keys, mouse, 
 
 from .audio import SoundBank
 from .combat import Battle, V2
-from .effects import Effects
+from .effects_plus import CombatEffects as Effects
 from .models import Arena, CharacterModel, part, ring_mesh, tint
 from .roster import ROSTER, KEYS
 from .ui import Interface
@@ -181,7 +181,7 @@ class Game(Entity):
             if key == 'enter':
                 self.start_match()
             elif key in ('left arrow', 'right arrow', 'up arrow', 'down arrow'):
-                change = {'left arrow': -1, 'right arrow': 1, 'up arrow': -3, 'down arrow': 3}[key]
+                change = {'left arrow': -1, 'right arrow': 1, 'up arrow': -4, 'down arrow': 4}[key]
                 self.select_character(self.selected[self.selection_side]+change)
             elif key == 'v':
                 self.set_selection_side(1-self.selection_side)
@@ -218,6 +218,8 @@ class Game(Entity):
             self.battle.jump(0)
         elif key == 'f':
             self.battle.ultimate(0)
+        elif key == 'b':
+            self.battle.domain_blade(0)
 
     def update(self):
         self.tick(min(.05, time.dt))
@@ -250,7 +252,10 @@ class Game(Entity):
                 self.ui.notify(event['text'])
             elif kind == 'cast' and event['owner'] == 1:
                 self.ui.notify('INIMIGO / '+event['text'], 1.4)
-            elif kind in ('qte_result', 'parry', 'break', 'domain'):
+            elif kind == 'transform':
+                self.ui.show_hud()
+                self.ui.announce(event['text'], 2.2)
+            elif kind in ('qte_result', 'parry', 'break', 'domain', 'adapt', 'reflect', 'blade_pickup'):
                 self.ui.announce(event['text'], 1.5)
             elif kind == 'hit':
                 self.shake = max(self.shake, .10 if event['heavy'] else .04)
@@ -270,13 +275,17 @@ class Game(Entity):
         self._camera(dt)
 
     def _sync_rigs(self, dt):
-        for rig, shadow, f in zip(self.rigs, self.shadows, self.battle.fighters):
+        for index, f in enumerate(self.battle.fighters):
+            rig, shadow = self.rigs[index], self.shadows[index]
+            if rig.character_id != f.character_id:
+                destroy(rig)
+                rig = self.rigs[index] = CharacterModel(f.character_id, parent=self.actors)
             rig.position = (f.pos.x, f.height, f.pos.z)
             delta = self.battle.target(f).pos-f.pos
             rig.rotation_y = math.degrees(math.atan2(delta.x, delta.z))
             rig.pose(dt, f)
             shadow.position = (f.pos.x, .033, f.pos.z)
-            shadow.scale = .95-f.height*.12
+            shadow.scale = (1.5 if f.character_id == 'mahoraga' else .95)-f.height*.12
             shadow.alpha = .45-f.height*.12
 
     def _camera(self, dt):
@@ -285,6 +294,10 @@ class Game(Entity):
         distance = (a.pos-b.pos).length()
         center = Vec3(midpoint.x, 1.25, midpoint.z)
         desired = Vec3(midpoint.x, 5.8+distance*.055, midpoint.z-12-distance*.27)
+        if any(f.character_id == 'mahoraga' for f in self.battle.fighters):
+            center.y = 2.2
+            desired.y += 1.1
+            desired.z -= 1.0
         if self.battle.qte:
             actor = self.battle.fighters[self.battle.qte.actor]
             center = Vec3(actor.pos.x, 1.9, actor.pos.z)

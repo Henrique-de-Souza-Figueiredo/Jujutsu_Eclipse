@@ -219,7 +219,7 @@ class CombatTests(unittest.TestCase):
                 battle.step(.016)
                 if spec.ultimate_kind in DOMAIN_KINDS:
                     self.assertIsNotNone(battle.domain)
-                advance(battle, 7)
+                advance(battle, 11)
                 self.assertGreater(battle.fighters[0].damage_dealt, 0)
                 self.assertIsNone(battle.domain)
 

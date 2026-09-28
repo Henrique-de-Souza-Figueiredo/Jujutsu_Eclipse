@@ -5,7 +5,7 @@ import textwrap
 from ursina import Entity, Text, Button, camera
 
 from .models import tint
-from .roster import ROSTER, KEYS
+from .roster import ROSTER, KEYS, PHENOMENA
 from .lifecycle import dispose as destroy
 
 
@@ -81,19 +81,19 @@ class Interface:
                    GOLD if side == game.selection_side else '#223146', INK if side == game.selection_side else WHITE, .65)
         self.cards = []
         for i, spec in enumerate(ROSTER):
-            x, y = -.699+(i%3)*.234, .133-(i//3)*.087
+            x, y = -.728+(i%4)*.177, .133-(i//4)*.087
             selected = i == game.selected[game.selection_side]
-            card = button(root, '', x, y, .218, .073, lambda n=i: game.select_character(n),
+            card = button(root, '', x, y, .167, .073, lambda n=i: game.select_character(n),
                           '#33465a' if selected else '#1b293c')
-            quad(root, x-.105, y, .004, .073, spec.accent, z=-.026)
+            quad(root, x-.080, y, .004, .073, spec.accent, z=-.026)
             short = spec.name.split()[0].upper()
             if spec.id == 'sukuna':
                 short = 'SUKUNA'
-            label(root, short, x-.089, y+.018, .80, spec.accent if selected else WHITE)
+            label(root, short, x-.068, y+.018, .64, spec.accent if selected else WHITE)
             label(root, f'{i+1:02d}  /  '+('VILÃO' if spec.id in ('sukuna', 'mahito', 'jogo') else 'FEITICEIRO'),
-                  x-.089, y-.014, .43, MUTED)
+                  x-.068, y-.014, .37, MUTED)
             if i in game.selected:
-                label(root, 'P1' if game.selected[0] == i else 'CPU', x+.066, y+.02, .46, GOLD)
+                label(root, 'P1' if game.selected[0] == i else 'CPU', x+.048, y+.028, .35, GOLD)
             self.cards.append(card)
         spec = ROSTER[game.selected[game.selection_side]]
         label(root, spec.title, .065, .414, .64, spec.accent)
@@ -112,7 +112,7 @@ class Interface:
         a, b = (ROSTER[n] for n in game.selected)
         label(root, a.name+'  ×  '+b.name, -.81, -.36, .64, MUTED)
         button(root, 'ENTRAR NA ARENA   /   ENTER', -.454, -.422, .711, .066, game.start_match, GOLD, INK, .83)
-        label(root, '12 PERSONAGENS  /  48 TÉCNICAS  /  12 SUPREMOS', .087, -.41, .51, GOLD)
+        label(root, f'{len(ROSTER)} PERSONAGENS  /  MAHORAGA CONTROLÁVEL', .087, -.41, .51, GOLD)
         label(root, 'WASD  mover     J K  atacar     L  defender', .087, -.443, .57, MUTED)
         label(root, 'Fan game • modelos e áudio criados para este projeto', -.81, -.481, .44, MUTED)
 
@@ -155,7 +155,7 @@ class Interface:
             sub = label(root, '', x-.177, -.389, .56, MUTED)
             cooldown = Meter(root, x-.185, -.427, .370, .004, battle.fighters[0].spec.accent)
             self.skills.append((sub, cooldown))
-        label(root, 'WASD mover   J combo   K forte   L guarda   ESPAÇO esquiva   C salto   G energia   F supremo   TAB guia   ESC pausa',
+        label(root, 'WASD mover   J/K atacar   L guarda   ESPAÇO esquiva   C salto   G energia   F supremo   B katana   TAB guia   ESC pausa',
               0, -.477, .51, MUTED, True)
         self.enemy_ult = label(root, '', .31, -.262, .59, MUTED)
         self.context = label(root, '', .05, -.302, .62, GOLD)
@@ -182,7 +182,8 @@ class Interface:
             self.hp_labels[i].text = f'{math.ceil(fighter.hp)} / {fighter.spec.health} PV    |    GUARDA {int(fighter.guard)}'
             statuses = []
             for key, name in (('infinity', 'INFINITO'), ('empower', 'REFORÇADO'), ('armor', 'ARMADURA'),
-                              ('root', 'PRESO'), ('burn', 'QUEIMADURA'), ('rika', 'RIKA'), ('weakpoint', 'PONTO FRACO')):
+                              ('root', 'PRESO'), ('burn', 'QUEIMADURA'), ('rika', 'RIKA'), ('weakpoint', 'PONTO FRACO'),
+                              ('sky_guard', 'REFLEXÃO'), ('flight', 'VOO'), ('output', 'SAÍDA MÁXIMA')):
                 if fighter.has(key):
                     statuses.append(name)
             if fighter.marks.get('nails'):
@@ -217,7 +218,20 @@ class Interface:
         elif player.character_id == 'nobara':
             context = f"LIGAÇÃO  {enemy.marks.get('nails', 0)} PREGOS"
         elif player.character_id == 'yuta':
-            context = ('CÓPIA / '+enemy.spec.skills[0].name.upper()) if player.has('rika') else 'Invoque Rika com E para copiar'
+            if player.has('mutual_love'):
+                context = 'B perto de uma katana / técnica copiada'
+            else:
+                context = 'E Amor Puro / R Cópia' if player.has('rika') else 'E invoca Rika / F expande domínio'
+        elif player.character_id == 'megumi':
+            context = 'T / invocar e controlar Mahoraga (65 energia)'
+        elif player.character_id == 'mahoraga':
+            key = player.last_phenomenon
+            context = (f'RODA / {PHENOMENA.get(key, key).upper()} {player.adaptation.get(key, 0)}/3'
+                       if key else 'RODA / aguardando contato com um fenômeno')
+        elif player.character_id == 'uro':
+            context = 'CÉU DOBRADO / refletindo projéteis' if player.has('sky_guard') else 'E reflete / Q atravessa a guarda'
+        elif player.character_id == 'ryu':
+            context = 'PRÓXIMA DESCARGA +40%' if player.has('output') else 'T prepara saída máxima / Q Granite Blast'
         self.context.text = context
         self.notice_time -= dt
         self.banner_time -= dt
@@ -325,6 +339,8 @@ class Interface:
         label(root, textwrap.fill(spec.passive, 85), -.748, -.321, .57, spec.accent)
         label(root, 'CONTROLES', .352, .223, .71, GOLD)
         controls = [('W A S D', 'Mover na arena'), ('J / K', 'Combo / golpe forte'), ('L', 'Segurar: guarda'), ('ESPAÇO', 'Esquiva direcional'), ('C', 'Pular ataques de chão'), ('G', 'Segurar: recuperar recurso'), ('Q E R T', 'Técnicas do personagem'), ('F', 'Supremo / QTE'), ('M / ESC', 'Som / pausa'), ('F3', 'Restaurar no treino')]
+        if spec.id == 'yuta':
+            controls[-1] = ('B / F3', 'Katana / restaurar treino')
         for i, (key, description) in enumerate(controls):
             y = .17-i*.038
             label(root, key, .353, y, .55, spec.accent)

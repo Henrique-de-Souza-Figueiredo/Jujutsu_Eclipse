@@ -62,11 +62,11 @@ ROSTER = (
     Character('megumi', 'Megumi Fushiguro', 'DEZ SOMBRAS', 'Invocações / armadilhas',
               '#9c91ff', '#202b43', '#141e30', 240, 5.8, .92, 2.5,
               'Mestre das sombras: invocações duram 25% mais dentro do Jardim.',
-              'Cão Divino mantém a pressão. Prenda com Sapo antes de usar Nue.', (
+              'Prenda com Sapo antes de Nue. T invoca Mahoraga: você passa a controlá-lo.', (
         skill('Cão Divino', 25, 9, 'dog', 'Q: invoca um cão que persegue e ataca por 7 s.'),
         skill('Nue', 28, 8, 'nue', 'E: marca uma descarga. O raio atordoa após 0,65 s.', 12),
         skill('Sapo', 18, 6, 'toad', 'R: língua à distância; enraíza o alvo se acertar.', 10),
-        skill('Mergulho na Sombra', 20, 8, 'shadowstep', 'T: emerge atrás do inimigo com breve invulnerabilidade.', 12),
+        skill('Invocar Mahoraga', 65, 35, 'mahoraga', 'T: substitui Megumi por Mahoraga até o fim do round. Vida proporcional.'),
     ), 'Jardim das Sombras Quiméricas', 'shadow_domain', 'Megumi_Fushiguro'),
     Character('nobara', 'Nobara Kugisaki', 'BONECA DE PALHA', 'Marcas / detonação',
               '#ffb969', '#28334e', '#b97140', 230, 5.9, .95, 2.5,
@@ -80,12 +80,12 @@ ROSTER = (
     Character('yuta', 'Yuta Okkotsu', 'A PROMESSA', 'Espada / suporte / cópia',
               '#8cebc8', '#e5e7df', '#202333', 260, 5.7, 1.02, 3.2,
               'Energia imensa: regeneração de energia 35% maior.',
-              'Manifeste Rika com E. R copia Q do adversário enquanto ela está ativa.', (
+              'E manifesta Rika; E novamente dispara Amor Puro. F abre seu domínio; B usa katanas.', (
         skill('Corte Imbuído', 18, 4, 'katana', 'Q: corte avançando. A lâmina tem alcance maior que punhos.', 4),
-        skill('Rika', 32, 15, 'rika', 'E: invoca Rika por 8 s e habilita Cópia.'),
-        skill('Cópia', 26, 7, 'copy', 'R com Rika: usa a primeira técnica inimiga. Contra Maki, Fala Amaldiçoada.', 15),
+        skill('Rika / Amor Puro', 32, 15, 'rika', 'E: Rika por 8 s. E de novo com Rika: feixe por 30 de energia.'),
+        skill('Cópia', 26, 7, 'copy', 'R com Rika/domínio: copia o inimigo. Uro: reflexão; Maki: Fala Amaldiçoada.', 15),
         skill('Técnica Reversa', 38, 15, 'heal', 'T: recupera 36 de vida. Crie distância antes de usar.'),
-    ), 'Amor Puro', 'love_beam', 'Yuta_Okkotsu'),
+    ), 'Amor Mútuo Autêntico', 'mutual_love', 'Yuta_Okkotsu'),
     Character('maki', 'Maki Zenin', 'ESPECIALISTA EM ARMAS', 'Alcance / contra-ataque',
               '#9bd981', '#263c43', '#21443f', 280, 7.0, 1.17, 3.5,
               'Restrição Celestial: técnicas usam vigor físico; esquiva custa menos.',
@@ -149,8 +149,43 @@ ROSTER = (
         skill('Supernova', 24, 8, 'supernova', 'R com cargas: detona sangue ao redor do alvo; escala com cargas.', 10),
         skill('Escamas Vermelhas', 24, 12, 'red_scale', 'T: reforça velocidade, dano e defesa por 6 s.'),
     ), 'Manipulação de Sangue: Torrente', 'blood_final', 'Choso'),
+    Character('ryu', 'Ryu Ishigori', 'A MAIOR SAÍDA DE ENERGIA', 'Artilharia / feixes',
+              '#c792ff', '#302640', '#322334', 285, 5.3, 1.12, 2.9,
+              'Saída explosiva: projéteis causam 12% mais dano em disputas de feixes.',
+              'Q carrega Granite Blast. T aumenta a próxima descarga. Uro pode devolvê-la.', (
+        skill('Granite Blast', 26, 5, 'granite', 'Q: carregue no QTE; ESPAÇO na faixa aumenta potência e tamanho.', 18),
+        skill('Rajada de Granito', 25, 7, 'granite_volley', 'E: leque de cinco descargas. Controle o espaço de esquiva.', 18),
+        skill('Descarga Direta', 24, 6, 'point_blank', 'R a até 3,5 m: explosão de contato que lança o alvo.', 3.5),
+        skill('Saída Máxima', 20, 12, 'output', 'T: aumenta em 40% a próxima descarga em até 6 s.'),
+    ), 'Granite Blast: Saída Máxima', 'granite_final', 'Ryu_Ishigori'),
+    Character('uro', 'Takako Uro', 'MANIPULAÇÃO DO CÉU', 'Reflexão / distorção',
+              '#a5ddff', '#7c91b7', '#d6afc1', 240, 6.4, .98, 2.7,
+              'Céu tangível: defesa perfeita também devolve projéteis.',
+              'E dobra o céu e rebate projéteis. Q rompe a guarda. Áreas e domínios exigem esquiva.', (
+        skill('Quebra-Gelo Fino', 24, 5, 'thin_ice', 'Q a até 4,5 m: quebra o espaço e atravessa a guarda.', 4.5),
+        skill('Dobra do Céu', 25, 9, 'sky_guard', 'E: por 2,2 s, devolve projéteis ao lançador. Máximo de 2 reflexões.'),
+        skill('Voo Distorcido', 20, 7, 'sky_flight', 'R: reposiciona atrás do alvo e flutua brevemente.', 12),
+        skill('Manto Celeste', 22, 12, 'sky_mantle', 'T: por 6 s, a esquiva também ativa reflexão por 0,45 s.'),
+    ), 'Ruptura do Firmamento', 'sky_final', 'Takako_Uro'),
 )
 
-BY_ID = {c.id: c for c in ROSTER}
+MAHORAGA = Character('mahoraga', 'Mahoraga', 'GENERAL DIVINO DAS DEZ SOMBRAS', 'Adaptação / extermínio',
+                    '#f4dd9a', '#c5b998', '#ede7d9', 355, 5.8, 1.25, 3.8,
+                    'Adaptação: após 3 exposições a um fenômeno, reduz esse dano em 65%. A roda gira.',
+                    'Q pune maldições. Receba e analise fenômenos diferentes. T acelera a última adaptação.', (
+        skill('Espada do Extermínio', 20, 4, 'extermination', 'Q: corte de energia positiva; +50% contra Jogo e Mahito.', 4.5),
+        skill('Impacto do General', 24, 6, 'general_slam', 'E: investida e esmagamento do solo; quebra de postura.', 9),
+        skill('Corte Adaptativo', 30, 8, 'adaptive_slash', 'R: corte amplo. Após adaptação ao Infinito, atravessa a barreira.', 16),
+        skill('Giro da Roda', 30, 10, 'wheel', 'T: avança a análise do último fenômeno sofrido e regenera 18 PV.'),
+    ), 'General Divino: Extermínio', 'general_final', 'Eight-Handled_Sword_Divergent_Sila_Divine_General_Mahoraga')
+
+ALL_CHARACTERS = ROSTER + (MAHORAGA,)
+BY_ID = {c.id: c for c in ALL_CHARACTERS}
 KEYS = ('q', 'e', 'r', 't')
-DOMAIN_KINDS = {'void', 'shadow_domain', 'shrine', 'soul_domain', 'volcano_domain'}
+DOMAIN_KINDS = {'void', 'shadow_domain', 'shrine', 'soul_domain', 'volcano_domain', 'mutual_love'}
+
+PHENOMENA = {
+    'physical': 'impacto', 'slash': 'cortes', 'fire': 'chamas', 'blood': 'sangue',
+    'space': 'espaço', 'soul': 'alma', 'electric': 'eletricidade', 'beam': 'energia',
+    'positive': 'energia positiva', 'domain': 'domínios', 'infinity': 'Infinito',
+}
